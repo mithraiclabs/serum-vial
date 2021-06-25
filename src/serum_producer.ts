@@ -31,7 +31,7 @@ export class SerumProducer {
       validateL3Diffs: boolean
       marketName: string
       commitment: string
-      markets: SerumMarket[]
+      market: SerumMarket
     }
   ) {}
 
@@ -39,7 +39,7 @@ export class SerumProducer {
     let started = false
     logger.log('info', `Serum producer starting for ${this._options.marketName} market...`)
 
-    const marketMeta = this._options.markets.find((m) => m.name == this._options.marketName)!
+    const marketMeta = this._options.market;
 
     // don't use Solana web3.js Connection but custom rpcClient so we have more control and insight what is going on
     const rpcClient = new RPCClient({

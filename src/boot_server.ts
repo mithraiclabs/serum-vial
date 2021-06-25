@@ -4,6 +4,7 @@ import { Worker } from 'worker_threads'
 import { cleanupChannel, minionReadyChannel, serumProducerReadyChannel, wait } from './helpers'
 import { logger } from './logger'
 import { SerumMarket } from './types'
+import { startProducers } from './start_producers'
 
 export async function bootServer({
   port,
@@ -41,6 +42,8 @@ export async function bootServer({
     })
   }
 
+  startProducers({wsEndpointPort, markets, validateL3Diffs, commitment, nodeEndpoint})
+
   await new Promise<void>(async (resolve) => {
     while (true) {
       if (readyMinionsCount === MINIONS_COUNT) {
@@ -57,27 +60,6 @@ export async function bootServer({
   let readyProducersCount = 0
 
   serumProducerReadyChannel.onmessage = () => readyProducersCount++
-
-  for (const market of markets) {
-    const serumProducerWorker = new Worker(path.resolve(__dirname, 'serum_producer.js'), {
-      workerData: { marketName: market.name, nodeEndpoint, validateL3Diffs, markets, commitment, wsEndpointPort }
-    })
-
-    serumProducerWorker.on('error', (err) => {
-      logger.log(
-        'error',
-        `Serum producer worker ${serumProducerWorker.threadId} error occurred: ${err.message} ${err.stack}`
-      )
-      throw err
-    })
-
-    serumProducerWorker.on('exit', (code) => {
-      logger.log('error', `Serum producer worker: ${serumProducerWorker.threadId} died with code: ${code}`)
-    })
-
-    // just in case to not get hit by serum RPC node rate limits...
-    await wait(1000)
-  }
 
   await new Promise<void>(async (resolve) => {
     while (true) {
