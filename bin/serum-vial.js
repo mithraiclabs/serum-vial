@@ -64,6 +64,12 @@ const argv = yargs
     default: ''
   })
 
+  .option('graphql-url', {
+    type: 'string',
+    describe: 'URL for a GraphQL endpoint that allows subscribing to markets',
+    default: ''
+  })
+
   .help()
   .version()
   .usage('$0 [options]')
@@ -80,6 +86,7 @@ const { bootServer, logger, getDefaultMarkets } = require('../dist')
 async function start() {
   let markets = getDefaultMarkets()
   const marketsJsonPath = argv['markets-json']
+  const graphQlUrl = argv['graphql-url']
   if (marketsJsonPath) {
     try {
       const fullPath = path.join(process.cwd(), argv['markets-json'])
@@ -103,7 +110,8 @@ async function start() {
 
   await bootServer({
     ...options,
-    markets
+    markets,
+    graphQlUrl,
   })
 
   if (isDocker()) {

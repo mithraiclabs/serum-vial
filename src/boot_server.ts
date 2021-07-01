@@ -4,7 +4,7 @@ import { Worker } from 'worker_threads'
 import { cleanupChannel, minionReadyChannel, serumProducerReadyChannel, wait } from './helpers'
 import { logger } from './logger'
 import { SerumMarket } from './types'
-import { startProducers } from './start_producers'
+import { startProducers, subscribeToDatabaseMarkets } from './start_producers'
 
 export async function bootServer({
   port,
@@ -13,7 +13,8 @@ export async function bootServer({
   validateL3Diffs,
   minionsCount,
   markets,
-  commitment
+  commitment,
+  graphQlUrl,
 }: BootOptions) {
   // multi core support is linux only feature which allows multiple threads to bind to the same port
   // see https://github.com/uNetworking/uWebSockets.js/issues/304 and https://lwn.net/Articles/542629/
@@ -42,7 +43,12 @@ export async function bootServer({
     })
   }
 
-  startProducers({wsEndpointPort, markets, validateL3Diffs, commitment, nodeEndpoint})
+  // if provided with a GraphQL URL use the subscription method to subscribe
+  if (graphQlUrl) {
+    subscribeToDatabaseMarkets({wsEndpointPort, validateL3Diffs, commitment, nodeEndpoint, graphQlUrl})
+  } else {
+    startProducers({wsEndpointPort, markets, validateL3Diffs, commitment, nodeEndpoint})
+  }
 
   await new Promise<void>(async (resolve) => {
     while (true) {
@@ -87,4 +93,5 @@ type BootOptions = {
   minionsCount: number
   commitment: string
   markets: SerumMarket[]
+  graphQlUrl: string
 }
