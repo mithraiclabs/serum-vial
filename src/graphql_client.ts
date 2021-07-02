@@ -2,6 +2,8 @@ import { DocumentNode, execute } from 'apollo-link';
 import { WebSocketLink } from 'apollo-link-ws';
 import { SubscriptionClient } from 'subscriptions-transport-ws';
 import { gql } from 'graphql-tag';
+import fetch from "node-fetch"
+import { wait } from './helpers';
 
 const ws = require('ws');
 
@@ -16,6 +18,29 @@ const createSubscriptionObservable = (wsurl: string, query: DocumentNode, variab
   const link = new WebSocketLink(getWsClient(wsurl));
   return execute(link, {query: query, variables: variables});
 };
+
+export const waitUntilServerUp = async (graphQlUrl: string) => {
+  while(true) {
+    try {
+      const response = await fetch(graphQlUrl, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({query: {}}),
+      });
+      if (response.status === 200) {
+        break
+      }
+    } catch (error) {
+      console.error(error)
+    }
+    console.log('...GraphQL server not ready, waiting')
+    await wait(1000)
+  }
+  return true
+}
 
 type SubscriptionArguments = {
   graphQlUrl: string,

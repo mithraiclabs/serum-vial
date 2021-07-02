@@ -4,7 +4,8 @@ import { Worker } from 'worker_threads'
 import { cleanupChannel, minionReadyChannel, serumProducerReadyChannel, wait } from './helpers'
 import { logger } from './logger'
 import { SerumMarket } from './types'
-import { startProducers, subscribeToDatabaseMarkets } from './start_producers'
+import { addProducer, startProducers, subscribeToDatabaseMarkets } from './start_producers'
+import { ActivePsyOptionMarketResponse, subscribeToActivePsyOptionMarkets, waitUntilServerUp } from './graphql_client'
 
 export async function bootServer({
   port,
@@ -21,6 +22,8 @@ export async function bootServer({
   const MINIONS_COUNT = os.platform() === 'linux' ? minionsCount : 1
   let readyMinionsCount = 0
 
+  logger.log('info', `graphQlUrl: ${graphQlUrl}`)
+
   logger.log(
     'info',
     MINIONS_COUNT === 1 ? 'Starting single minion worker...' : `Starting ${MINIONS_COUNT} minion workers...`
@@ -28,25 +31,52 @@ export async function bootServer({
   minionReadyChannel.onmessage = () => readyMinionsCount++
 
   // start minions workers and wait until all are ready
-
-  for (let i = 0; i < MINIONS_COUNT; i++) {
-    const minionWorker = new Worker(path.resolve(__dirname, 'minion.js'), {
-      workerData: { nodeEndpoint, port, markets }
-    })
-
-    minionWorker.on('error', (err) => {
-      logger.log('error', `Minion worker ${minionWorker.threadId} error occurred: ${err.message} ${err.stack}`)
-      throw err
-    })
-    minionWorker.on('exit', (code) => {
-      logger.log('error', `Minion worker: ${minionWorker.threadId} died with code: ${code}`)
-    })
+  const startMinions = (minionMarkets: SerumMarket[]) => {
+    for (let i = 0; i < MINIONS_COUNT; i++) {
+      const minionWorker = new Worker(path.resolve(__dirname, 'minion.js'), {
+        workerData: { nodeEndpoint, port, markets: minionMarkets }
+      })
+  
+      minionWorker.on('error', (err) => {
+        logger.log('error', `Minion worker ${minionWorker.threadId} error occurred: ${err.message} ${err.stack}`)
+        throw err
+      })
+      minionWorker.on('exit', (code) => {
+        logger.log('error', `Minion worker: ${minionWorker.threadId} died with code: ${code}`)
+      })
+    }
   }
 
   // if provided with a GraphQL URL use the subscription method to subscribe
   if (graphQlUrl) {
-    subscribeToDatabaseMarkets({wsEndpointPort, validateL3Diffs, commitment, nodeEndpoint, graphQlUrl})
+    // wait until graphQL server is up and running
+    await waitUntilServerUp(graphQlUrl);
+
+    const starterPromise = Promise.resolve(null);
+    subscribeToActivePsyOptionMarkets({graphQlUrl, onEvent: async (eventData: ActivePsyOptionMarketResponse) => {
+      logger.log('info', `eventData returned: ${eventData.data.markets.length}`)
+      const updatedMarkets = eventData.data.markets.map(x => ({
+        address: x.serum_market.address,
+        name: x.serum_market.address,
+        programId: x.serum_market.program_id,
+        deprecated: false
+      }))
+      // When the markets array changes we need to restart the minions
+      stopServer();
+      startMinions(updatedMarkets);
+
+
+      // Add a producer for each active market
+      updatedMarkets.reduce( async (accumulator, market): Promise<null> => {
+        await accumulator
+        // avoid RPC node rate limits
+        await(1000)
+        return addProducer({wsEndpointPort, validateL3Diffs, nodeEndpoint, commitment, market})
+
+      }, starterPromise)
+    }})
   } else {
+    startMinions(markets);
     startProducers({wsEndpointPort, markets, validateL3Diffs, commitment, nodeEndpoint})
   }
 
@@ -93,5 +123,5 @@ type BootOptions = {
   minionsCount: number
   commitment: string
   markets: SerumMarket[]
-  graphQlUrl: string
+  graphQlUrl?: string
 }

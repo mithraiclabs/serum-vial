@@ -41,6 +41,7 @@ export const startProducers = async ({wsEndpointPort, validateL3Diffs, nodeEndpo
 export const subscribeToDatabaseMarkets = async ({wsEndpointPort, validateL3Diffs, nodeEndpoint, commitment, graphQlUrl}: SubscribeProducersArgs) => {
   const starterPromise = Promise.resolve(null);
   subscribeToActivePsyOptionMarkets({graphQlUrl, onEvent: async (eventData: ActivePsyOptionMarketResponse) => {
+    logger.log('info', `eventData returned: ${eventData.data.markets.length}`)
     eventData.data.markets.reduce( async (accumulator, currentMarket): Promise<null> => {
       await accumulator
       // avoid RPC node rate limits
