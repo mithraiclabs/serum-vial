@@ -2,7 +2,7 @@ import { MARKETS } from '@project-serum/serum'
 import didYouMean from 'didyoumean2'
 import { SerumMarket } from './types'
 
-export const wait = (delayMS: number) => new Promise((resolve) => setTimeout(resolve, delayMS))
+export const wait = (delayMS: number): Promise<null> => new Promise((resolve) => setTimeout(() => resolve(null), delayMS))
 
 export function getDidYouMean(input: string, allowedValues: readonly string[]) {
   let tip = ''

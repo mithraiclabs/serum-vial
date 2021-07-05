@@ -67,12 +67,11 @@ export async function bootServer({
 
 
       // Add a producer for each active market
-      updatedMarkets.reduce( async (accumulator, market): Promise<null> => {
+      updatedMarkets.reduce( async (accumulator, market) => {
         await accumulator
+        addProducer({wsEndpointPort, validateL3Diffs, nodeEndpoint, commitment, market})
         // avoid RPC node rate limits
-        await(1000)
-        return addProducer({wsEndpointPort, validateL3Diffs, nodeEndpoint, commitment, market})
-
+        return wait(1000)
       }, starterPromise)
     }})
   } else {

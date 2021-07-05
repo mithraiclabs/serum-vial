@@ -42,17 +42,17 @@ export const subscribeToDatabaseMarkets = async ({wsEndpointPort, validateL3Diff
   const starterPromise = Promise.resolve(null);
   subscribeToActivePsyOptionMarkets({graphQlUrl, onEvent: async (eventData: ActivePsyOptionMarketResponse) => {
     logger.log('info', `eventData returned: ${eventData.data.markets.length}`)
-    eventData.data.markets.reduce( async (accumulator, currentMarket): Promise<null> => {
+    eventData.data.markets.reduce( async (accumulator, currentMarket) => {
       await accumulator
-      // avoid RPC node rate limits
-      await(1000)
       const market = {
         address: currentMarket.serum_market.address,
         name: currentMarket.serum_market.address,
         programId: currentMarket.serum_market.program_id,
         deprecated: false
       }
-      return addProducer({wsEndpointPort, validateL3Diffs, nodeEndpoint, commitment, market})
+      addProducer({wsEndpointPort, validateL3Diffs, nodeEndpoint, commitment, market})
+      // avoid RPC node rate limits
+      return wait(1000)
     }, starterPromise)
   }})
 }
