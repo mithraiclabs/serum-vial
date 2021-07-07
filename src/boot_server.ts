@@ -4,6 +4,8 @@ import { Worker } from 'worker_threads'
 import { cleanupChannel, minionReadyChannel, serumProducerReadyChannel, wait } from './helpers'
 import { logger } from './logger'
 import { SerumMarket } from './types'
+import { addProducer, startProducers, subscribeToDatabaseMarkets } from './start_producers'
+import { ActivePsyOptionMarketResponse, subscribeToActivePsyOptionMarkets, waitUntilServerUp } from './graphql_client'
 
 export async function bootServer({
   port,
@@ -12,12 +14,15 @@ export async function bootServer({
   validateL3Diffs,
   minionsCount,
   markets,
-  commitment
+  commitment,
+  graphQlUrl,
 }: BootOptions) {
   // multi core support is linux only feature which allows multiple threads to bind to the same port
   // see https://github.com/uNetworking/uWebSockets.js/issues/304 and https://lwn.net/Articles/542629/
   const MINIONS_COUNT = os.platform() === 'linux' ? minionsCount : 1
   let readyMinionsCount = 0
+
+  logger.log('info', `graphQlUrl: ${graphQlUrl}`)
 
   logger.log(
     'info',
@@ -26,19 +31,52 @@ export async function bootServer({
   minionReadyChannel.onmessage = () => readyMinionsCount++
 
   // start minions workers and wait until all are ready
+  const startMinions = (minionMarkets: SerumMarket[]) => {
+    for (let i = 0; i < MINIONS_COUNT; i++) {
+      const minionWorker = new Worker(path.resolve(__dirname, 'minion.js'), {
+        workerData: { nodeEndpoint, port, markets: minionMarkets }
+      })
+  
+      minionWorker.on('error', (err) => {
+        logger.log('error', `Minion worker ${minionWorker.threadId} error occurred: ${err.message} ${err.stack}`)
+        throw err
+      })
+      minionWorker.on('exit', (code) => {
+        logger.log('error', `Minion worker: ${minionWorker.threadId} died with code: ${code}`)
+      })
+    }
+  }
 
-  for (let i = 0; i < MINIONS_COUNT; i++) {
-    const minionWorker = new Worker(path.resolve(__dirname, 'minion.js'), {
-      workerData: { nodeEndpoint, port, markets }
-    })
+  // if provided with a GraphQL URL use the subscription method to subscribe
+  if (graphQlUrl) {
+    // wait until graphQL server is up and running
+    await waitUntilServerUp(graphQlUrl);
 
-    minionWorker.on('error', (err) => {
-      logger.log('error', `Minion worker ${minionWorker.threadId} error occurred: ${err.message} ${err.stack}`)
-      throw err
-    })
-    minionWorker.on('exit', (code) => {
-      logger.log('error', `Minion worker: ${minionWorker.threadId} died with code: ${code}`)
-    })
+    const starterPromise = Promise.resolve(null);
+    subscribeToActivePsyOptionMarkets({graphQlUrl, onEvent: async (eventData: ActivePsyOptionMarketResponse) => {
+      logger.log('info', `eventData returned: ${eventData.data.markets.length}`)
+      const updatedMarkets = eventData.data.markets.map(x => ({
+        address: x.serum_market.address,
+        name: x.serum_market.address,
+        programId: x.serum_market.program_id,
+        deprecated: false
+      }))
+      // When the markets array changes we need to restart the minions
+      stopServer();
+      startMinions(updatedMarkets);
+
+
+      // Add a producer for each active market
+      updatedMarkets.reduce( async (accumulator, market) => {
+        await accumulator
+        addProducer({wsEndpointPort, validateL3Diffs, nodeEndpoint, commitment, market})
+        // avoid RPC node rate limits
+        return wait(1000)
+      }, starterPromise)
+    }})
+  } else {
+    startMinions(markets);
+    startProducers({wsEndpointPort, markets, validateL3Diffs, commitment, nodeEndpoint})
   }
 
   await new Promise<void>(async (resolve) => {
@@ -57,27 +95,6 @@ export async function bootServer({
   let readyProducersCount = 0
 
   serumProducerReadyChannel.onmessage = () => readyProducersCount++
-
-  for (const market of markets) {
-    const serumProducerWorker = new Worker(path.resolve(__dirname, 'serum_producer.js'), {
-      workerData: { marketName: market.name, nodeEndpoint, validateL3Diffs, markets, commitment, wsEndpointPort }
-    })
-
-    serumProducerWorker.on('error', (err) => {
-      logger.log(
-        'error',
-        `Serum producer worker ${serumProducerWorker.threadId} error occurred: ${err.message} ${err.stack}`
-      )
-      throw err
-    })
-
-    serumProducerWorker.on('exit', (code) => {
-      logger.log('error', `Serum producer worker: ${serumProducerWorker.threadId} died with code: ${code}`)
-    })
-
-    // just in case to not get hit by serum RPC node rate limits...
-    await wait(1000)
-  }
 
   await new Promise<void>(async (resolve) => {
     while (true) {
@@ -105,4 +122,5 @@ type BootOptions = {
   minionsCount: number
   commitment: string
   markets: SerumMarket[]
+  graphQlUrl?: string
 }

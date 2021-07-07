@@ -1,10 +1,18 @@
-from node:15-slim
-# version arg contains current git tag
-ARG VERSION_ARG
-# install git
-RUN apt-get update && apt-get install -y git
+FROM node:15-slim
+WORKDIR /app
+COPY ./package*.json ./
+COPY ./tsconfig.json ./
+COPY ./src ./src
+RUN npm install
+RUN npm run build
 
-# install serum-vial globally (exposes serum-vial command)
-RUN npm install --global --unsafe-perm serum-vial@$VERSION_ARG
+
+FROM node:15-slim
+WORKDIR /app
+COPY ./package*.json ./
+RUN npm install --only=production
+COPY --from=0 /app/dist ./dist
+
+COPY ./bin/serum-vial.js ./bin/serum-vial.js
 # run it
-CMD serum-vial
+CMD ./bin/serum-vial.js
